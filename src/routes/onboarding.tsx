@@ -2,40 +2,48 @@ import { createFileRoute, useNavigate, redirect } from "@tanstack/react-router";
 import { GraduationCap, Briefcase, Presentation, Table2 } from "lucide-react";
 import { useState } from "react";
 import { Logo } from "@/components/doca/Logo";
-import { useDoca } from "@/lib/doca/store";
+import { useOnboarding } from "@/lib/doca/queries";
+import { supabase } from "@/lib/supabase/client";
 
 export const Route = createFileRoute("/onboarding")({
-  beforeLoad: () => {
-    if (typeof window !== "undefined") {
-      const raw = localStorage.getItem("doca-state-v1");
-      if (raw) {
-        try {
-          const s = JSON.parse(raw)?.state;
-          if (!s?.authed) throw redirect({ to: "/auth", search: { mode: "signup" } });
-        } catch (e) {
-          if (e && typeof e === "object" && "to" in e) throw e;
-        }
-      }
-    }
+  beforeLoad: async () => {
+    if (typeof window === "undefined") return;
+    const { data } = await supabase.auth.getSession();
+    if (!data.session) throw redirect({ to: "/auth", search: { mode: "signup" } });
   },
   component: Onboarding,
 });
 
 const OPTIONS = [
-  { id: "academic", Icon: GraduationCap, title: "Trabalhos académicos", desc: "Relatórios, monografias, resumos." },
-  { id: "office", Icon: Briefcase, title: "Documentos de escritório", desc: "Memorandos, propostas, contratos." },
-  { id: "slides", Icon: Presentation, title: "Apresentações", desc: "Slides para reuniões e aulas." },
+  {
+    id: "academic",
+    Icon: GraduationCap,
+    title: "Trabalhos académicos",
+    desc: "Relatórios, monografias, resumos.",
+  },
+  {
+    id: "office",
+    Icon: Briefcase,
+    title: "Documentos de escritório",
+    desc: "Memorandos, propostas, contratos.",
+  },
+  {
+    id: "slides",
+    Icon: Presentation,
+    title: "Apresentações",
+    desc: "Slides para reuniões e aulas.",
+  },
   { id: "sheets", Icon: Table2, title: "Planilhas", desc: "Orçamentos, cálculos, listagens." },
 ];
 
 function Onboarding() {
   const [selected, setSelected] = useState<string | null>(null);
-  const setOnboarded = useDoca((s) => s.setOnboarded);
+  const onboarding = useOnboarding();
   const navigate = useNavigate();
 
-  const submit = () => {
+  const submit = async () => {
     if (!selected) return;
-    setOnboarded(selected);
+    await onboarding.mutateAsync(selected);
     navigate({ to: "/dashboard" });
   };
 
@@ -45,7 +53,9 @@ function Onboarding() {
         <Logo />
       </header>
       <main className="mx-auto max-w-2xl px-6 py-16 sm:px-10">
-        <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-primary">Passo 1 de 1</div>
+        <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-primary">
+          Passo 1 de 1
+        </div>
         <h1 className="mt-4 font-display text-3xl font-medium tracking-tight sm:text-4xl">
           O que precisas gerar mais?
         </h1>
@@ -61,7 +71,9 @@ function Onboarding() {
                 key={id}
                 onClick={() => setSelected(id)}
                 className={`flex items-start gap-3 rounded-lg border p-4 text-left transition ${
-                  active ? "border-primary bg-primary/5" : "border-hairline bg-paper hover:border-muted-foreground/40"
+                  active
+                    ? "border-primary bg-primary/5"
+                    : "border-hairline bg-paper hover:border-muted-foreground/40"
                 }`}
               >
                 <Icon className="mt-0.5 h-5 w-5 shrink-0 text-primary" strokeWidth={1.5} />
@@ -76,10 +88,10 @@ function Onboarding() {
 
         <button
           onClick={submit}
-          disabled={!selected}
+          disabled={!selected || onboarding.isPending}
           className="mt-8 w-full rounded-md bg-primary px-5 py-3 text-[14px] font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-40 sm:w-auto sm:px-8"
         >
-          Continuar
+          {onboarding.isPending ? "A guardar…" : "Continuar"}
         </button>
       </main>
     </div>

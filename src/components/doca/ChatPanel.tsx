@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ArrowUp } from "lucide-react";
-import { useDoca, type ChatMessage } from "@/lib/doca/store";
-import { inferKindFromPrompt, buildMockContent, assistantReply } from "@/lib/doca/mock-generator";
-
-const uid = () => Math.random().toString(36).slice(2, 10);
+import { toast } from "sonner";
+import type { ChatMessage } from "@/lib/doca/store";
+import { inferKindFromPrompt } from "@/lib/doca/mock-generator";
+import { InsufficientCreditsError } from "@/lib/doca/api";
+import { useDocument, useProfile, useSendMessage } from "@/lib/doca/queries";
+import { BuyCreditsModal } from "./BuyCreditsModal";
 
 interface Props {
   docId: string;
@@ -11,56 +13,51 @@ interface Props {
 }
 
 export function ChatPanel({ docId, compact = false }: Props) {
-  const doc = useDoca((s) => s.docs.find((d) => d.id === docId));
-  const appendMessage = useDoca((s) => s.appendMessage);
-  const setContent = useDoca((s) => s.setContent);
-  const setStatus = useDoca((s) => s.setStatus);
-  const renameDoc = useDoca((s) => s.renameDoc);
+  const { data } = useDocument(docId);
+  const { data: profile } = useProfile();
+  const sendMessage = useSendMessage();
 
   const [input, setInput] = useState("");
-  const [sending, setSending] = useState(false);
+  const [buyOpen, setBuyOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
-  }, [doc?.messages.length, sending]);
+  }, [data?.messages.length, sendMessage.isPending]);
 
-  if (!doc) return null;
+  if (!data) return null;
+  const { document: doc, messages, conversationId } = data;
+  const outOfCredits = (profile?.credits_balance ?? 0) <= 0;
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     const text = input.trim();
-    if (!text || sending) return;
+    if (!text || sendMessage.isPending || !conversationId) return;
+    if (outOfCredits) {
+      setBuyOpen(true);
+      return;
+    }
     setInput("");
-    setSending(true);
-
-    const userMsg: ChatMessage = { id: uid(), role: "user", content: text, createdAt: Date.now() };
-    appendMessage(docId, userMsg);
 
     const kind = doc.content?.kind ?? inferKindFromPrompt(text);
-    setStatus(docId, "generating");
-
-    // Simulate streaming generation
-    await new Promise((r) => setTimeout(r, 700));
-    const content = buildMockContent(text, kind);
-    setContent(docId, content);
-
-    if (doc.messages.length === 0) {
-      renameDoc(docId, content.title.slice(0, 60));
+    try {
+      await sendMessage.mutateAsync({
+        documentId: doc.id,
+        conversationId,
+        kind,
+        text,
+        isFirstMessage: messages.length === 0,
+      });
+    } catch (err) {
+      if (err instanceof InsufficientCreditsError) {
+        setBuyOpen(true);
+      } else {
+        toast.error("Algo correu mal. Tenta novamente.");
+      }
     }
-
-    await new Promise((r) => setTimeout(r, 900));
-    const reply: ChatMessage = {
-      id: uid(), role: "assistant",
-      content: assistantReply(text, kind),
-      createdAt: Date.now(),
-    };
-    appendMessage(docId, reply);
-    setStatus(docId, "ready");
-    setSending(false);
   };
 
-  const empty = doc.messages.length === 0;
+  const empty = messages.length === 0;
 
   return (
     <div className="flex h-full flex-col bg-background">
@@ -89,11 +86,13 @@ export function ChatPanel({ docId, compact = false }: Props) {
             </div>
           </div>
         ) : (
-          <div className={`mx-auto flex max-w-2xl flex-col gap-6 ${compact ? "px-4 py-5" : "px-5 py-6"}`}>
-            {doc.messages.map((m) => (
+          <div
+            className={`mx-auto flex max-w-2xl flex-col gap-6 ${compact ? "px-4 py-5" : "px-5 py-6"}`}
+          >
+            {messages.map((m) => (
               <MessageBubble key={m.id} msg={m} />
             ))}
-            {sending && (
+            {sendMessage.isPending && (
               <div className="text-[13px] text-subtle doca-fade-up">
                 <span className="doca-caret">A pensar</span>
               </div>
@@ -102,7 +101,22 @@ export function ChatPanel({ docId, compact = false }: Props) {
         )}
       </div>
 
-      <form onSubmit={submit} className="border-t border-hairline bg-background px-4 py-3 sm:px-5 sm:py-4">
+      {outOfCredits && (
+        <div className="flex items-center justify-between gap-3 border-t border-hairline bg-destructive/5 px-4 py-2.5 sm:px-5">
+          <span className="text-[12.5px] text-destructive">Sem créditos — adicionar pacote</span>
+          <button
+            onClick={() => setBuyOpen(true)}
+            className="shrink-0 rounded-md bg-primary px-2.5 py-1 text-[11.5px] font-medium text-primary-foreground transition hover:opacity-90"
+          >
+            Comprar créditos
+          </button>
+        </div>
+      )}
+
+      <form
+        onSubmit={submit}
+        className="border-t border-hairline bg-background px-4 py-3 sm:px-5 sm:py-4"
+      >
         <div className="mx-auto max-w-2xl">
           <div className="flex items-end gap-2 rounded-lg border border-hairline bg-paper p-2 focus-within:border-primary/50 focus-within:ring-1 focus-within:ring-primary/20 transition">
             <textarea
@@ -117,11 +131,11 @@ export function ChatPanel({ docId, compact = false }: Props) {
               placeholder="Escreve o que precisas… (Ex: relatório sobre energia solar em Moçambique)"
               rows={1}
               className="min-h-[36px] max-h-40 flex-1 resize-none bg-transparent px-2 py-1.5 text-[14px] leading-relaxed text-foreground placeholder:text-muted-foreground/70 focus:outline-none"
-              disabled={sending}
+              disabled={sendMessage.isPending}
             />
             <button
               type="submit"
-              disabled={!input.trim() || sending}
+              disabled={!input.trim() || sendMessage.isPending}
               className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground transition hover:opacity-90 disabled:opacity-30"
               aria-label="Enviar"
             >
@@ -133,6 +147,8 @@ export function ChatPanel({ docId, compact = false }: Props) {
           </div>
         </div>
       </form>
+
+      <BuyCreditsModal open={buyOpen} onClose={() => setBuyOpen(false)} />
     </div>
   );
 }
@@ -156,7 +172,9 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
   }
   return (
     <div className="doca-fade-up">
-      <div className="mb-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Doca</div>
+      <div className="mb-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+        Doca
+      </div>
       <div className="text-[14px] leading-relaxed text-foreground">{msg.content}</div>
     </div>
   );

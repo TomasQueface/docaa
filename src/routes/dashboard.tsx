@@ -2,40 +2,45 @@ import { createFileRoute, useNavigate, redirect, Link } from "@tanstack/react-ro
 import { Plus, FileText, Presentation, Table2, FileType, ArrowRight } from "lucide-react";
 import { HistorySidebar } from "@/components/doca/HistorySidebar";
 import { DocKindIcon } from "@/components/doca/DocKindIcon";
-import { useDoca, docKindLabel, type DocKind } from "@/lib/doca/store";
+import { docKindLabel, type DocKind } from "@/lib/doca/store";
+import { useCreateDocument, useDocuments } from "@/lib/doca/queries";
+import { supabase } from "@/lib/supabase/client";
 
 export const Route = createFileRoute("/dashboard")({
-  beforeLoad: () => {
-    if (typeof window !== "undefined") {
-      const raw = localStorage.getItem("doca-state-v1");
-      if (!raw) throw redirect({ to: "/auth", search: { mode: "signup" } });
-      try {
-        const s = JSON.parse(raw)?.state;
-        if (!s?.authed) throw redirect({ to: "/auth", search: { mode: "signin" } });
-        if (!s?.onboarded) throw redirect({ to: "/onboarding" });
-      } catch (e) {
-        if (e && typeof e === "object" && "to" in e) throw e;
-      }
-    }
+  beforeLoad: async () => {
+    if (typeof window === "undefined") return;
+    const { data } = await supabase.auth.getSession();
+    if (!data.session) throw redirect({ to: "/auth", search: { mode: "signin" } });
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("audience")
+      .eq("id", data.session.user.id)
+      .maybeSingle();
+    if (!profile?.audience) throw redirect({ to: "/onboarding" });
   },
   component: Dashboard,
 });
 
 const QUICK: { kind: DocKind; Icon: typeof FileText; label: string; desc: string }[] = [
   { kind: "word", Icon: FileText, label: "Word", desc: "Relatório, ensaio, carta" },
-  { kind: "slides", Icon: Presentation, label: "Apresentação", desc: "Slides para reunião ou aula" },
+  {
+    kind: "slides",
+    Icon: Presentation,
+    label: "Apresentação",
+    desc: "Slides para reunião ou aula",
+  },
   { kind: "sheet", Icon: Table2, label: "Planilha", desc: "Orçamento, lista, cálculo" },
   { kind: "pdf", Icon: FileType, label: "PDF", desc: "Documento pronto a partilhar" },
 ];
 
 function Dashboard() {
-  const docs = useDoca((s) => s.docs);
-  const createDoc = useDoca((s) => s.createDoc);
+  const { data: docs = [], isLoading } = useDocuments();
+  const createDocument = useCreateDocument();
   const navigate = useNavigate();
 
-  const start = (kind: DocKind) => {
-    const id = createDoc(kind);
-    navigate({ to: "/w/$id", params: { id } });
+  const start = async (kind: DocKind) => {
+    const { documentId } = await createDocument.mutateAsync({ kind });
+    navigate({ to: "/w/$id", params: { id: documentId } });
   };
 
   return (
@@ -47,10 +52,14 @@ function Dashboard() {
       <main className="overflow-y-auto">
         <header className="flex items-center justify-between border-b border-hairline px-5 py-4 sm:px-10">
           <div className="md:hidden">
-            <Link to="/dashboard"><span className="font-display text-lg font-semibold">Doca</span></Link>
+            <Link to="/dashboard">
+              <span className="font-display text-lg font-semibold">Doca</span>
+            </Link>
           </div>
           <div className="hidden md:block">
-            <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Workspace</div>
+            <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
+              Workspace
+            </div>
           </div>
           <button
             onClick={() => start("word")}
@@ -61,7 +70,9 @@ function Dashboard() {
         </header>
 
         <div className="mx-auto max-w-5xl px-5 py-10 sm:px-10 sm:py-14">
-          <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-primary">Bom trabalho</div>
+          <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-primary">
+            Bom trabalho
+          </div>
           <h1 className="mt-3 font-display text-3xl font-medium tracking-tight sm:text-4xl">
             O que vamos terminar hoje?
           </h1>
@@ -92,9 +103,13 @@ function Dashboard() {
             </div>
           </div>
 
-          {docs.length === 0 ? (
+          {isLoading ? (
+            <div className="mt-12 text-center text-[13px] text-subtle">A carregar…</div>
+          ) : docs.length === 0 ? (
             <div className="mt-12 rounded-lg border border-dashed border-hairline bg-paper px-6 py-16 text-center">
-              <div className="mx-auto inline-flex"><DocKindIcon kind="word" size={36} /></div>
+              <div className="mx-auto inline-flex">
+                <DocKindIcon kind="word" size={36} />
+              </div>
               <h3 className="mt-5 font-display text-lg font-medium">Nenhum documento ainda</h3>
               <p className="mx-auto mt-2 max-w-sm text-[13.5px] text-subtle">
                 Descreve o que precisas e eu começo a construir.
@@ -117,12 +132,24 @@ function Dashboard() {
                   >
                     <DocKindIcon kind={d.kind} size={26} />
                     <div className="min-w-0 flex-1">
-                      <div className="truncate font-medium text-[14px] text-foreground">{d.name}</div>
+                      <div className="truncate font-medium text-[14px] text-foreground">
+                        {d.title}
+                      </div>
                       <div className="mt-0.5 flex items-center gap-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
                         <span>{docKindLabel[d.kind]}</span>
                         <span>·</span>
-                        <span>{new Date(d.updatedAt).toLocaleDateString("pt-PT", { day: "2-digit", month: "short" })}</span>
-                        {d.status === "ready" && <><span>·</span><span className="text-success">pronto</span></>}
+                        <span>
+                          {new Date(d.updated_at).toLocaleDateString("pt-PT", {
+                            day: "2-digit",
+                            month: "short",
+                          })}
+                        </span>
+                        {d.status === "ready" && (
+                          <>
+                            <span>·</span>
+                            <span className="text-success">pronto</span>
+                          </>
+                        )}
                       </div>
                     </div>
                     <ArrowRight className="h-4 w-4 text-muted-foreground" />

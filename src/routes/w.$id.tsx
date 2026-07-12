@@ -1,25 +1,28 @@
 import { createFileRoute, useNavigate, redirect, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { ArrowLeft, Download, MessageSquare, FileText, Maximize2, Minimize2, PanelLeftClose, PanelLeft } from "lucide-react";
+import {
+  ArrowLeft,
+  Download,
+  MessageSquare,
+  FileText,
+  Maximize2,
+  Minimize2,
+  PanelLeft,
+} from "lucide-react";
 import { HistorySidebar } from "@/components/doca/HistorySidebar";
 import { ChatPanel } from "@/components/doca/ChatPanel";
 import { DocumentPreview } from "@/components/doca/DocumentPreview";
 import { ExportModal } from "@/components/doca/ExportModal";
 import { GeneratingIndicator } from "@/components/doca/GeneratingIndicator";
-import { useDoca, docKindExt, docKindLabel } from "@/lib/doca/store";
+import { docKindExt, docKindLabel, type DocKind } from "@/lib/doca/store";
+import { useDocument, useRenameDocument } from "@/lib/doca/queries";
+import { supabase } from "@/lib/supabase/client";
 
 export const Route = createFileRoute("/w/$id")({
-  beforeLoad: () => {
-    if (typeof window !== "undefined") {
-      const raw = localStorage.getItem("doca-state-v1");
-      if (!raw) throw redirect({ to: "/auth", search: { mode: "signup" } });
-      try {
-        const s = JSON.parse(raw)?.state;
-        if (!s?.authed) throw redirect({ to: "/auth", search: { mode: "signin" } });
-      } catch (e) {
-        if (e && typeof e === "object" && "to" in e) throw e;
-      }
-    }
+  beforeLoad: async () => {
+    if (typeof window === "undefined") return;
+    const { data } = await supabase.auth.getSession();
+    if (!data.session) throw redirect({ to: "/auth", search: { mode: "signup" } });
   },
   component: Workspace,
 });
@@ -29,30 +32,50 @@ type View = "split" | "chat-only" | "doc-only";
 function Workspace() {
   const { id } = Route.useParams();
   const navigate = useNavigate();
-  const doc = useDoca((s) => s.docs.find((d) => d.id === id));
-  const setActive = useDoca((s) => s.setActive);
-  const renameDoc = useDoca((s) => s.renameDoc);
+  const { data, isLoading } = useDocument(id);
+  const renameDocument = useRenameDocument();
 
   const [view, setView] = useState<View>("split");
   const [exportOpen, setExportOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [mobileTab, setMobileTab] = useState<"chat" | "doc">("chat");
+  const [name, setName] = useState("");
 
-  useEffect(() => { setActive(id); }, [id, setActive]);
+  useEffect(() => {
+    if (data?.document) setName(data.document.title);
+  }, [data?.document.id, data?.document.title]);
 
-  if (!doc) {
+  if (isLoading) {
+    return (
+      <div className="flex h-screen items-center justify-center text-[13px] text-subtle">
+        A carregar…
+      </div>
+    );
+  }
+
+  if (!data) {
     return (
       <div className="flex h-screen items-center justify-center px-6 text-center">
         <div>
           <h2 className="font-display text-xl font-medium">Documento não encontrado</h2>
-          <Link to="/dashboard" className="mt-4 inline-block text-primary underline-offset-4 hover:underline">Voltar ao dashboard</Link>
+          <Link
+            to="/dashboard"
+            className="mt-4 inline-block text-primary underline-offset-4 hover:underline"
+          >
+            Voltar ao dashboard
+          </Link>
         </div>
       </div>
     );
   }
 
-  // Auto-switch to doc tab on mobile when content first arrives
+  const doc = data.document;
   const hasContent = !!doc.content;
+
+  const commitRename = () => {
+    const trimmed = name.trim();
+    if (trimmed && trimmed !== doc.title) renameDocument.mutate({ id, title: trimmed });
+  };
 
   return (
     <div className="flex h-screen w-full overflow-hidden">
@@ -65,8 +88,17 @@ function Workspace() {
       {sidebarOpen && (
         <div className="fixed inset-0 z-40 md:hidden" onClick={() => setSidebarOpen(false)}>
           <div className="absolute inset-0 bg-foreground/30" />
-          <div className="absolute left-0 top-0 h-full w-[280px] bg-background" onClick={(e) => e.stopPropagation()}>
-            <HistorySidebar activeId={id} onSelect={(nid) => { setSidebarOpen(false); navigate({ to: "/w/$id", params: { id: nid } }); }} />
+          <div
+            className="absolute left-0 top-0 h-full w-[280px] bg-background"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <HistorySidebar
+              activeId={id}
+              onSelect={(nid) => {
+                setSidebarOpen(false);
+                navigate({ to: "/w/$id", params: { id: nid } });
+              }}
+            />
           </div>
         </div>
       )}
@@ -82,27 +114,49 @@ function Workspace() {
             >
               <PanelLeft className="h-4 w-4" />
             </button>
-            <Link to="/dashboard" className="hidden items-center gap-1.5 rounded p-1.5 text-muted-foreground transition hover:bg-muted hover:text-foreground md:inline-flex" aria-label="Voltar">
+            <Link
+              to="/dashboard"
+              className="hidden items-center gap-1.5 rounded p-1.5 text-muted-foreground transition hover:bg-muted hover:text-foreground md:inline-flex"
+              aria-label="Voltar"
+            >
               <ArrowLeft className="h-4 w-4" />
             </Link>
             <input
-              value={doc.name}
-              onChange={(e) => renameDoc(id, e.target.value)}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              onBlur={commitRename}
               className="min-w-0 max-w-[40vw] truncate rounded bg-transparent px-1.5 py-1 text-[14px] font-medium text-foreground outline-none transition hover:bg-muted focus:bg-muted"
             />
             <span className="hidden shrink-0 font-mono text-[10px] uppercase tracking-wider text-muted-foreground sm:inline">
               {docKindExt[doc.kind]} · {docKindLabel[doc.kind]}
             </span>
             {doc.status === "generating" && (
-              <span className="hidden sm:inline"><GeneratingIndicator kind={doc.kind} /></span>
+              <span className="hidden sm:inline">
+                <GeneratingIndicator kind={doc.kind} />
+              </span>
             )}
           </div>
 
           <div className="flex items-center gap-1">
             <div className="hidden items-center gap-0.5 rounded-md border border-hairline bg-paper p-0.5 lg:flex">
-              <ViewBtn active={view === "split"} onClick={() => setView("split")} icon={<MessageSquare className="h-3.5 w-3.5" />} label="Split" />
-              <ViewBtn active={view === "chat-only"} onClick={() => setView("chat-only")} icon={<Minimize2 className="h-3.5 w-3.5" />} label="Chat" />
-              <ViewBtn active={view === "doc-only"} onClick={() => setView("doc-only")} icon={<Maximize2 className="h-3.5 w-3.5" />} label="Documento" />
+              <ViewBtn
+                active={view === "split"}
+                onClick={() => setView("split")}
+                icon={<MessageSquare className="h-3.5 w-3.5" />}
+                label="Split"
+              />
+              <ViewBtn
+                active={view === "chat-only"}
+                onClick={() => setView("chat-only")}
+                icon={<Minimize2 className="h-3.5 w-3.5" />}
+                label="Chat"
+              />
+              <ViewBtn
+                active={view === "doc-only"}
+                onClick={() => setView("doc-only")}
+                icon={<Maximize2 className="h-3.5 w-3.5" />}
+                label="Documento"
+              />
             </div>
             <button
               onClick={() => setExportOpen(true)}
@@ -120,7 +174,9 @@ function Workspace() {
           {/* Desktop layout */}
           <div className="hidden flex-1 md:flex">
             {view !== "doc-only" && (
-              <div className={`${view === "chat-only" ? "flex-1" : "w-[380px] shrink-0 border-r border-hairline lg:w-[420px]"}`}>
+              <div
+                className={`${view === "chat-only" ? "flex-1" : "w-[380px] shrink-0 border-r border-hairline lg:w-[420px]"}`}
+              >
                 <ChatPanel docId={id} compact />
               </div>
             )}
@@ -138,8 +194,16 @@ function Workspace() {
           {/* Mobile: tab switcher */}
           <div className="flex flex-1 flex-col md:hidden">
             <div className="flex shrink-0 border-b border-hairline bg-background">
-              <MobileTab active={mobileTab === "chat"} onClick={() => setMobileTab("chat")} label="Chat" />
-              <MobileTab active={mobileTab === "doc"} onClick={() => setMobileTab("doc")} label="Documento" />
+              <MobileTab
+                active={mobileTab === "chat"}
+                onClick={() => setMobileTab("chat")}
+                label="Chat"
+              />
+              <MobileTab
+                active={mobileTab === "doc"}
+                onClick={() => setMobileTab("doc")}
+                label="Documento"
+              />
             </div>
             <div className="flex-1 overflow-hidden">
               {mobileTab === "chat" ? (
@@ -147,7 +211,10 @@ function Workspace() {
               ) : (
                 <div className="h-full overflow-y-auto bg-muted/40 px-4 py-6">
                   {hasContent ? (
-                    <DocumentPreview content={doc.content} generating={doc.status === "generating"} />
+                    <DocumentPreview
+                      content={doc.content}
+                      generating={doc.status === "generating"}
+                    />
                   ) : (
                     <EmptyDoc kind={doc.kind} />
                   )}
@@ -158,12 +225,27 @@ function Workspace() {
         </div>
       </div>
 
-      <ExportModal open={exportOpen} onClose={() => setExportOpen(false)} kind={doc.kind} name={doc.name} />
+      <ExportModal
+        open={exportOpen}
+        onClose={() => setExportOpen(false)}
+        kind={doc.kind}
+        name={doc.title}
+      />
     </div>
   );
 }
 
-function ViewBtn({ active, onClick, icon, label }: { active: boolean; onClick: () => void; icon: React.ReactNode; label: string }) {
+function ViewBtn({
+  active,
+  onClick,
+  icon,
+  label,
+}: {
+  active: boolean;
+  onClick: () => void;
+  icon: React.ReactNode;
+  label: string;
+}) {
   return (
     <button
       onClick={onClick}
@@ -177,7 +259,15 @@ function ViewBtn({ active, onClick, icon, label }: { active: boolean; onClick: (
   );
 }
 
-function MobileTab({ active, onClick, label }: { active: boolean; onClick: () => void; label: string }) {
+function MobileTab({
+  active,
+  onClick,
+  label,
+}: {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+}) {
   return (
     <button
       onClick={onClick}
@@ -190,7 +280,7 @@ function MobileTab({ active, onClick, label }: { active: boolean; onClick: () =>
   );
 }
 
-function EmptyDoc({ kind }: { kind: import("@/lib/doca/store").DocKind }) {
+function EmptyDoc({ kind }: { kind: DocKind }) {
   return (
     <div className="mx-auto flex max-w-md flex-col items-center justify-center py-20 text-center">
       <FileText className="h-7 w-7 text-muted-foreground/60" strokeWidth={1.2} />

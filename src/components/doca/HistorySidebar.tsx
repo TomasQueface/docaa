@@ -1,22 +1,34 @@
 import { Link, useNavigate } from "@tanstack/react-router";
 import { Plus, MessageSquare, MoreHorizontal, Trash2, LogOut } from "lucide-react";
 import { useState } from "react";
-import { useDoca, docKindLabel } from "@/lib/doca/store";
+import { docKindLabel } from "@/lib/doca/store";
+import { useCreateDocument, useDeleteDocument, useDocuments, useProfile } from "@/lib/doca/queries";
+import { signOut } from "@/lib/auth/actions";
 import { Logo } from "./Logo";
 import { DocKindIcon } from "./DocKindIcon";
+import { BuyCreditsModal } from "./BuyCreditsModal";
 
-export function HistorySidebar({ activeId, onSelect }: { activeId?: string | null; onSelect?: (id: string) => void }) {
-  const docs = useDoca((s) => s.docs);
-  const email = useDoca((s) => s.email);
-  const createDoc = useDoca((s) => s.createDoc);
-  const deleteDoc = useDoca((s) => s.deleteDoc);
-  const signOut = useDoca((s) => s.signOut);
+export function HistorySidebar({
+  activeId,
+  onSelect,
+}: {
+  activeId?: string | null;
+  onSelect?: (id: string) => void;
+}) {
+  const { data: docs = [] } = useDocuments();
+  const { data: profile } = useProfile();
+  const createDocument = useCreateDocument();
+  const deleteDocument = useDeleteDocument();
   const navigate = useNavigate();
   const [menuId, setMenuId] = useState<string | null>(null);
+  const [buyOpen, setBuyOpen] = useState(false);
 
-  const handleNew = () => {
-    const id = createDoc("word", "Novo documento");
-    navigate({ to: "/w/$id", params: { id } });
+  const handleNew = async () => {
+    const { documentId } = await createDocument.mutateAsync({
+      kind: "word",
+      title: "Novo documento",
+    });
+    navigate({ to: "/w/$id", params: { id: documentId } });
   };
 
   return (
@@ -60,16 +72,21 @@ export function HistorySidebar({ activeId, onSelect }: { activeId?: string | nul
                   >
                     <MessageSquare className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                     <div className="min-w-0 flex-1">
-                      <div className="truncate text-[13px] font-medium text-foreground">{d.name}</div>
+                      <div className="truncate text-[13px] font-medium text-foreground">
+                        {d.title}
+                      </div>
                       <div className="mt-0.5 flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
                         <span>{docKindLabel[d.kind]}</span>
                         <span>·</span>
-                        <span>{formatTime(d.updatedAt)}</span>
+                        <span>{formatTime(new Date(d.updated_at).getTime())}</span>
                       </div>
                     </div>
                   </button>
                   <button
-                    onClick={(e) => { e.stopPropagation(); setMenuId(menuId === d.id ? null : d.id); }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setMenuId(menuId === d.id ? null : d.id);
+                    }}
                     className="absolute right-1 top-1.5 rounded p-1 text-muted-foreground opacity-0 transition group-hover:opacity-100 hover:bg-hairline"
                   >
                     <MoreHorizontal className="h-3.5 w-3.5" />
@@ -77,7 +94,10 @@ export function HistorySidebar({ activeId, onSelect }: { activeId?: string | nul
                   {menuId === d.id && (
                     <div className="absolute right-1 top-9 z-10 rounded-md border border-hairline bg-paper py-1 shadow-lg">
                       <button
-                        onClick={() => { deleteDoc(d.id); setMenuId(null); }}
+                        onClick={() => {
+                          deleteDocument.mutate(d.id);
+                          setMenuId(null);
+                        }}
                         className="flex w-full items-center gap-2 px-3 py-1.5 text-[12px] text-destructive hover:bg-muted"
                       >
                         <Trash2 className="h-3 w-3" />
@@ -95,11 +115,21 @@ export function HistorySidebar({ activeId, onSelect }: { activeId?: string | nul
       <div className="border-t border-hairline px-4 py-3">
         <div className="flex items-center justify-between gap-2">
           <div className="min-w-0">
-            <div className="truncate text-[12px] font-medium text-foreground">{email ?? "Convidado"}</div>
-            <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Plano grátis</div>
+            <div className="truncate text-[12px] font-medium text-foreground">
+              {profile?.email ?? "Convidado"}
+            </div>
+            <button
+              onClick={() => setBuyOpen(true)}
+              className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground transition hover:text-primary"
+            >
+              {profile ? `${profile.credits_balance} créditos` : "…"}
+            </button>
           </div>
           <button
-            onClick={() => { signOut(); navigate({ to: "/" }); }}
+            onClick={async () => {
+              await signOut();
+              navigate({ to: "/" });
+            }}
             className="rounded p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
             aria-label="Sair"
           >
@@ -107,6 +137,8 @@ export function HistorySidebar({ activeId, onSelect }: { activeId?: string | nul
           </button>
         </div>
       </div>
+
+      <BuyCreditsModal open={buyOpen} onClose={() => setBuyOpen(false)} />
     </aside>
   );
 }

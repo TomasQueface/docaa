@@ -12,13 +12,16 @@ import { Toaster } from "sonner";
 
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
+import { AuthProvider } from "../lib/auth/AuthProvider";
 
 function NotFoundComponent() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className="max-w-md text-center">
         <p className="font-mono text-xs uppercase tracking-[0.2em] text-muted-foreground">404</p>
-        <h1 className="mt-4 font-display text-3xl font-medium text-foreground">Página não encontrada</h1>
+        <h1 className="mt-4 font-display text-3xl font-medium text-foreground">
+          Página não encontrada
+        </h1>
         <p className="mt-3 text-sm text-subtle">
           O endereço que procuras não existe ou foi movido.
         </p>
@@ -45,15 +48,14 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className="max-w-md text-center">
-        <h1 className="font-display text-2xl font-medium text-foreground">
-          Algo correu mal
-        </h1>
-        <p className="mt-2 text-sm text-subtle">
-          Tenta novamente ou volta ao início.
-        </p>
+        <h1 className="font-display text-2xl font-medium text-foreground">Algo correu mal</h1>
+        <p className="mt-2 text-sm text-subtle">Tenta novamente ou volta ao início.</p>
         <div className="mt-6 flex flex-wrap justify-center gap-2">
           <button
-            onClick={() => { router.invalidate(); reset(); }}
+            onClick={() => {
+              router.invalidate();
+              reset();
+            }}
             className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-90"
           >
             Tentar novamente
@@ -76,16 +78,36 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { title: "Doca — Workspace de documentos com IA" },
-      { name: "description", content: "Gera trabalhos académicos, apresentações, planilhas e PDFs profissionais com IA. Feito para terminar o trabalho, não só conversar." },
+      {
+        name: "description",
+        content:
+          "Gera trabalhos académicos, apresentações, planilhas e PDFs profissionais com IA. Feito para terminar o trabalho, não só conversar.",
+      },
       { name: "author", content: "Doca" },
       { property: "og:title", content: "Doca — Workspace de documentos com IA" },
-      { property: "og:description", content: "Gera trabalhos académicos, apresentações, planilhas e PDFs profissionais com IA. Feito para terminar o trabalho, não só conversar." },
+      {
+        property: "og:description",
+        content:
+          "Gera trabalhos académicos, apresentações, planilhas e PDFs profissionais com IA. Feito para terminar o trabalho, não só conversar.",
+      },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
       { name: "twitter:title", content: "Doca — Workspace de documentos com IA" },
-      { name: "twitter:description", content: "Gera trabalhos académicos, apresentações, planilhas e PDFs profissionais com IA. Feito para terminar o trabalho, não só conversar." },
-      { property: "og:image", content: "https://storage.googleapis.com/gpt-engineer-file-uploads/attachments/og-images/d53be7ad-7d0c-460b-b40c-851565bba64f" },
-      { name: "twitter:image", content: "https://storage.googleapis.com/gpt-engineer-file-uploads/attachments/og-images/d53be7ad-7d0c-460b-b40c-851565bba64f" },
+      {
+        name: "twitter:description",
+        content:
+          "Gera trabalhos académicos, apresentações, planilhas e PDFs profissionais com IA. Feito para terminar o trabalho, não só conversar.",
+      },
+      {
+        property: "og:image",
+        content:
+          "https://storage.googleapis.com/gpt-engineer-file-uploads/attachments/og-images/d53be7ad-7d0c-460b-b40c-851565bba64f",
+      },
+      {
+        name: "twitter:image",
+        content:
+          "https://storage.googleapis.com/gpt-engineer-file-uploads/attachments/og-images/d53be7ad-7d0c-460b-b40c-851565bba64f",
+      },
     ],
     links: [
       { rel: "stylesheet", href: appCss },
@@ -121,19 +143,21 @@ function RootComponent() {
   const { queryClient } = Route.useRouteContext();
   return (
     <QueryClientProvider client={queryClient}>
-      <Outlet />
-      <Toaster
-        position="bottom-right"
-        toastOptions={{
-          style: {
-            background: "var(--color-paper)",
-            color: "var(--color-foreground)",
-            border: "1px solid var(--color-hairline)",
-            borderRadius: "6px",
-            fontFamily: "var(--font-sans)",
-          },
-        }}
-      />
+      <AuthProvider>
+        <Outlet />
+        <Toaster
+          position="bottom-right"
+          toastOptions={{
+            style: {
+              background: "var(--color-paper)",
+              color: "var(--color-foreground)",
+              border: "1px solid var(--color-hairline)",
+              borderRadius: "6px",
+              fontFamily: "var(--font-sans)",
+            },
+          }}
+        />
+      </AuthProvider>
     </QueryClientProvider>
   );
 }
